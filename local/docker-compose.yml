@@ -1,0 +1,58 @@
+# docker compose para Apache Spark 3.5 + Jupyter (PySpark)
+# Imagen oficial: https://jupyter-docker-stacks.readthedocs.io/en/latest/using/selecting.html#jupyter-pyspark-notebook
+#
+# Levanta:
+#   - spark-master: Spark driver + Jupyter (puerto 8888)
+#   - spark-worker: ejecutor adicional para sentir el cluster (puerto 8081)
+#
+# Uso:
+#   docker compose -f local/docker-compose.yml up -d
+#   docker compose -f local/docker-compose.yml logs -f spark-master  # ver token Jupyter
+#   docker compose -f local/docker-compose.yml down
+
+services:
+  spark-master:
+    image: jupyter/pyspark-notebook:spark-3.5.0
+    container_name: spark-master
+    hostname: spark-master
+    user: root
+    ports:
+      - "8888:8888"   # Jupyter
+      - "4040:4040"   # Spark UI
+      - "8080:8080"   # Spark master UI
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - PYSPARK_SUBMIT_ARGS=--master spark://spark-master:7077 pyspark-shell
+      - JUPYTER_ENABLE_LAB=yes
+      - GRANT_SUDO=yes
+    volumes:
+      - ./notebooks:/home/jovyan/work/notebooks
+      - ./data:/home/jovyan/work/data
+    working_dir: /home/jovyan/work
+    command: >
+      bash -c "
+        start-notebook.py --NotebookApp.token='spark' --NotebookApp.password='' &&
+        start-master.sh && start-worker.sh spark://spark-master:7077
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  spark-worker:
+    image: jupyter/pyspark-notebook:spark-3.5.0
+    container_name: spark-worker
+    hostname: spark-worker
+    user: root
+    ports:
+      - "8081:8081"   # Spark worker UI
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    command: start-worker.sh spark://spark-master:7077
